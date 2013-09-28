@@ -1,535 +1,520 @@
+/* bug
+ * 1.串口输入框输入以零开头时报错
+ * 
+ * 
+*/
+
+
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
 using System.Linq;
 using System.Text;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
-using System.IO.Ports;
-using Microsoft.Kinect;
-using Coding4Fun.Kinect.Wpf;
-using System.Drawing;
-using System.Threading;
-using System.Windows.Threading;
-using System.Net;
-using System.Net.Sockets;
-
-namespace SkeletalTracking
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using SpeakLib;                    //加入语音模块
+using System.IO.Ports;             //加入串口调用
+using ProductInfomationLib;        //加入商品信息库
+using Map;
+using RouteLibrary;
+using System.Runtime.InteropServices;
+namespace GouTu
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
-    public partial class MainWindow : Window
+    public partial class Form1 : Form
     {
-        #region variables
-        //Serial 
+
+        #region variable
+        ProductInfomationLib.Product[] products;
         SerialPort serial = new SerialPort();
-        string recieved_data;
-        Socket client;
-        private byte[] sockSrvRecvBuff = new byte[50];		// Receive data buffer
+        private int proid1 = -1;
+        private int proid2 = -1;
+        private int proid3 = -1;
+
+        int nowPoint = 0;
+        int lastNode = 0;
+        int nextNode = 0;
+
+        const int QueueLength = 10;
+        byte[] Queue = new byte[QueueLength];
+        int QueueHead = 0;//Point to the value at the head of the queue
+        int QueueTail = 0;//After the last item  //Empty queue when QueueHead == QueueTail
         #endregion
 
-
-        private int a = 130;
-
-        
-        public MainWindow()
+        public Form1()
         {
             InitializeComponent();
 
-            //kinectSensorChooser1.Kinect.ElevationAngle = 0;
-            socketServerStart();
+            //初始化商品信息
+            products = ProductInfomationLib.Product.GetProducts();
+
+            //初始化地图坐标信息
+            Map.Class1.CreateMap();
+            RouteLibrary.Class1.SetPAndPosition();
+
+            //初始化端口信息
+         //   InitPort();
         }
 
-        bool closing = false;
-        const int skeletonCount = 6; 
-        Skeleton[] allSkeletons = new Skeleton[skeletonCount];
-        int humanTrackedIndex = 0;
-        bool humanPreviouslyTracked = false;
-
-        private void Connect_Comms(object sender, RoutedEventArgs e)
+        
+        #region 输出商品信息
+        private void OutputProductInfo(double index, bool inway)
         {
-            if (Connect_btn.Content == "Connect")
+            int sink = -1;
+            if (inway)                          //从串口输入
             {
-                //Sets up serial port
-                serial.PortName = Comm_Port_Names.Text;
-                serial.BaudRate = Convert.ToInt32(Baud_Rates.Text);
-                serial.Handshake = System.IO.Ports.Handshake.None;
-                serial.Parity = Parity.None;
-                serial.DataBits = 8;
-                serial.StopBits = StopBits.One;
-                serial.ReadTimeout = 200;
-                serial.WriteTimeout = 50;
-                serial.Open();
+                sink = (int)index;
+                Paint(sink);
 
-                //Sets button State and Creates function call on data recieved
-                Connect_btn.Content = "Disconnect";
-                serial.DataReceived += new System.IO.Ports.SerialDataReceivedEventHandler(Recieve);
+            }
+            else                                //从条形码输入
+            {
+                for (int i = 0; i <= 29; i++)
+                    if (products[i].labelnum == index)
+                        sink = i;
 
+                Paint(sink);
+            }
+        }
+
+        private void Paint(int index)
+        {
+            //商品名称
+            this.tbxName.Text = products[index].name.ToString();
+
+            //商品分类
+            if (products[index].type == 0)
+                this.tbxType.Text = "食物";
+            else
+                this.tbxType.Text = "学习生活用品";
+
+            //商品价格
+            this.tbxPrice.Text = Convert.ToString(products[index].price) + "元";
+
+            //商品货架号
+            this.tbxShelf.Text = "第" + (((index + 1) % 6 == 0) ? ((index + 1) / 6) : ((index + 1) / 6 + 1)).ToString() + "货架";
+
+            //商品层数
+            if (((index) / 3 + 1) % 2 == 0)
+                this.tbxStair.Text = "第2层";
+            else
+                this.tbxStair.Text = "第1层";
+
+            EnsureOrder(index);
+
+            RichPaint(index);
+        }
+
+        private void EnsureOrder(int index)
+        {
+            if (proid1 == -1)
+                proid1 = index;
+            else if (proid2 == -1)
+                proid2 = index;
+            else if (proid3 == -1)
+                proid3 = index;
+
+        }
+
+        private void btnInfo_Click(object sender, EventArgs e)
+        {
+            SpeakLib.Class1.Read(
+                                "商品信息如下："
+                                + "名称" + this.tbxName.Text.ToString()
+                                + "分类" + this.tbxType.Text.ToString()
+                                + "价格" + this.tbxPrice.Text.ToString()
+                                + "货架编号" + this.tbxShelf.Text.ToString()
+                                + "层数" + this.tbxStair.Text.ToString()
+                                );
+        }
+
+        private void RichPaint(int indext)
+        {
+            if (proid1 == -1) //zero
+            {
+
+            }
+            else if (proid2 == -1)//one
+            {
+                this.rtxMessage.Text =
+                    ("当前已购买商品数：\n\t1件\n"
+                    + "商品名称：\n\t" + products[proid1].name + "\n"
+                    + "单价：\n\t" + products[proid1].price + "元\n"
+                    + "总价：\n\t" + products[proid1].price + "元\n"
+                    );
+
+            }
+            else if (proid3 == -1)//two
+            {
+                this.rtxMessage.Text =
+                    ("当前已购买商品数：\t2件\n"
+                    + "商品1：\n\t" + products[proid1].name + "\n"
+                    + "单价：\n\t" + products[proid1].price + "元\n"
+                    + "商品2：\n\t" + products[proid2].name + "\n"
+                    + "单价：\n\t" + products[proid2].price + "元\n"
+                    + "总价：\t" + (products[proid1].price + products[proid2].price) + "元\n"
+                    );
+            }
+            else //three
+            {
+                this.rtxMessage.Text =
+                   ("当前已购买商品数：\t3件\n"
+                   + "商品1：\n\t" + products[proid1].name + "\n"
+                   + "单价：\n\t" + products[proid1].price + "元\n"
+                   + "商品2：\n\t" + products[proid2].name + "\n"
+                   + "单价：\n\t" + products[proid2].price + "元\n"
+                   + "商品3：\n\t" + products[proid3].name + "\n"
+                   + "单价：\n\t" + products[proid3].price + "元\n"
+                   + "总价：\t" + (products[proid1].price + products[proid2].price + products[proid3].price) + "元\n"
+                   );
+            }
+        }
+        #endregion
+
+
+        #region 按键响应程序
+
+        //从键盘输入商品编号
+        private void textBox1_TextChanged(object sender, EventArgs e)
+        {
+            double index = -1;
+            TextBox tb = (TextBox)sender;
+            if (tb.Text.IndexOf('#') == 1 | tb.Text.IndexOf('#') == 2)                            //从0开始
+            {
+                index = Convert.ToDouble(tb.Text.Substring(0, (tb.Text.IndexOf('#')))) - 1;             //这个index从0开始
+                OutputProductInfo(index, true);
+            }
+        }
+
+        //读条形码
+        private void tbxLabelnum_TextChanged(object sender, EventArgs e)
+        {
+            TextBox tb = (TextBox)sender;
+            if (tb.Text.Length < 13)
+                return;
+
+            else
+            {
+                string num = tb.Text.Substring(0, 13);
+                MessageBox.Show(num);
+                OutputProductInfo(Convert.ToDouble(num), false);
+
+                //发送商品3的信息
+                if (products[proid3].type == 0)
+                    serial.Write("*$");
+                else
+                    serial.Write("*@");
+            }
+        }
+        private void btnEnd_Click(object sender, EventArgs e)
+        {
+            SpeakLib.Class1.Read(this.rtxMessage.Text);
+        }
+    
+        private void Form1_Load(object sender, EventArgs e)
+        {
+
+        }
+        private void rtxMessage_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+        private void groupBox5_Enter(object sender, EventArgs e)
+        {
+
+        }
+        private void groupBox4_Enter(object sender, EventArgs e)
+        {
+
+        }
+
+        private void btnFollow_Click(object sender, EventArgs e)
+        {
+            InitPort();
+            DaoGou();
+            serial.Close();             //注意传完信息后串口必须关闭，否则下一次传输时无法执行InitPort（）；
+            tbxLabelnum.Focus();
+        }
+
+        private void btnSeparate_Click(object sender, EventArgs e)
+        {
+            InitPort();
+
+            serial.Close();             
+        }
+        #endregion
+
+        #region 串口相关
+
+        private void InitPort()
+        {
+            serial.PortName = "COM4";                                    //串口号                        
+            serial.BaudRate = 9600;                                     //波特率
+            serial.Handshake = System.IO.Ports.Handshake.None;          //交换位
+            serial.Parity = Parity.None;                                //奇偶校验
+            serial.DataBits = 8;                                        //数据位
+            serial.StopBits = StopBits.One;                             //停止位
+            serial.ReadTimeout = 200;
+            serial.WriteTimeout = 50;
+            serial.Open();
+        }
+
+        private int QueueHeadNext()
+        {
+            return (QueueHead + 1) % QueueLength;
+        }
+        private int QueueTailNext()
+        {
+            return (QueueTail + 1) % QueueLength;
+        }
+        private bool QueuePush(byte item)
+        {
+            if (QueueTailNext() == QueueHead)//Able to store QueueLength-1 items at most
+            {
+              //  printDebug("Queue Full. ");
+                return (false);
             }
             else
             {
-                try // just in case serial port is not open could also be acheved using if(serial.IsOpen)
-                {
-                    serial.Close();
-                    Connect_btn.Content = "Connect";
-                }
-                catch
-                {
-                }
+                Queue[QueueTail] = item;
+                QueueTail = QueueTailNext();
+                return (true);
             }
         }
-
-        #region Recieving
-
-        private delegate void UpdateUiTextDelegate(string text);
-        private void Recieve(object sender, System.IO.Ports.SerialDataReceivedEventArgs e)
+        private byte QueuePop()
         {
-            // Collecting the characters received to our 'buffer' (string).
-            recieved_data = serial.ReadExisting();
-            Dispatcher.Invoke(DispatcherPriority.Send, new UpdateUiTextDelegate(WriteData), recieved_data);
-        }
-        private void WriteData(string text)
-        {
-            TextSerialReceived.AppendText(text);
-        }
-
-        #endregion
-
-        #region Sending
-
-        private void Send_Data(object sender, RoutedEventArgs e)
-        {
-            SerialCmdSend(SerialData.Text);
-            SerialData.Text = "";
-        }
-        public void SerialCmdSend(string data)
-        {
-            if (serial.IsOpen)
+            if (QueueHead == QueueTail)
             {
-                try
-                {
-                   
-                    serial.Write(data);
-                }
-                catch (Exception ex)
-                {
-                    TextSerialReceived.AppendText("Failed to SEND" + data + "\n" + ex + "\n");
-                }
+              //  printDebug("... ");
             }
-            
+            while (QueueHead == QueueTail)
+            {
+            }
+            byte ret = Queue[QueueHead];
+            QueueHead = QueueHeadNext();
+            return (ret);
         }
 
-        #endregion
-
-        private void Window_Loaded(object sender, RoutedEventArgs e)
+        private void TransmitPoints(int productIndex)   //传送算出的路径上经过的坐标点,注意此函数只能在调用Dijkstra后使用
         {
-            kinectSensorChooser1.KinectSensorChanged += new DependencyPropertyChangedEventHandler(kinectSensorChooser1_KinectSensorChanged);
-            textBox0.AppendText("Window_Loaded\n");
-        }
+            string allPoints = "";
 
-        void kinectSensorChooser1_KinectSensorChanged(object sender, DependencyPropertyChangedEventArgs e)
-        {
-            KinectSensor old = (KinectSensor)e.OldValue;
-
-            StopKinect(old);
-
-            KinectSensor sensor = (KinectSensor)e.NewValue;
-
-            if (sensor == null)
-            {
-                return;
-            }
-
-            var parameters = new TransformSmoothParameters
-            {
-                Smoothing = 0.3f,
-                Correction = 0.0f,
-                Prediction = 0.0f,
-                JitterRadius = 1.0f,
-                MaxDeviationRadius = 0.5f
-            };
-            //sensor.SkeletonStream.Enable(parameters);
-
-            sensor.SkeletonStream.Enable();
-
-            sensor.AllFramesReady += new EventHandler<AllFramesReadyEventArgs>(sensor_AllFramesReady);
-            sensor.DepthStream.Enable(DepthImageFormat.Resolution640x480Fps30); 
-            sensor.ColorStream.Enable(ColorImageFormat.RgbResolution640x480Fps30);
-
-            try
-            {
-                sensor.Start();
-            }
-            catch (System.IO.IOException)
-            {
-                kinectSensorChooser1.AppConflictOccurred();
-            }
-        }
-
-        void sensor_AllFramesReady(object sender, AllFramesReadyEventArgs e)
-        {
-            if (closing)
-            {
-                return;
-            }
-
-            //Get a skeleton
-            Skeleton first =  GetFirstSkeleton(e);
-
-            if (first == null)
-            {
-                return; 
-            }
-
-            //set scaled position
-            //ScalePosition(headImage, first.Joints[JointType.Head]);
-            //ScalePosition(leftEllipse, first.Joints[JointType.HandLeft]);
-            //ScalePosition(rightEllipse, first.Joints[JointType.HandRight]);
-
-            GetCameraPoint(first, e);
-
-            float SpineX = first.Joints[JointType.Spine].Position.X;
-            float SpineY = first.Joints[JointType.Spine].Position.Y;
-            float SpineZ = first.Joints[JointType.Spine].Position.Z;
-            TextSpineX.Text = SpineX.ToString();
-            TextSpineY.Text = SpineY.ToString();
-            TextSpineZ.Text = SpineZ.ToString();
-
-
-            //判断x是否超出阈值
-            if (SpineX>0.7&& SpineZ>0.4)//！！！还要判断一下z的变化量，但不知道如何求这个量
-            {
-                //MessageBox.Show("左转");
-                
-                serial.Write("#！3@"+(SpineZ-0.4)+"*");
-            }
-            else if (SpineX<-0.7 && SpineZ>0.4)
-            {
-                //MessageBox.Show("右转");
-                serial.Write("#！4@" + (SpineZ - 0.4) + "*");
-            }
-            xelse if (SpineZ>1.2 &&SpineX<0.1 || SpineX>-0.1 )
-            {
-                //MessageBox.Show("要前进");
-                serial.Write("#！1@" + (SpineZ - 0.4) + "*");
-            }
-            else if (SpineZ<0.4)
-            {
-                //MessageBox.Show("要停止");
-                serial.Write("#！2@" + (SpineZ - 0.4) + "*");
-            }
-            // float SpineXBig = SpineX * 1000;
-
-           
-           // SerialCmdSend(SpineXBig.ToString("0000.")+'x');
-            
-            //SerialCmdSend(SpineZBig.ToString("0000.") + 'z');
-        }
-
-        void GetCameraPoint(Skeleton first, AllFramesReadyEventArgs e)
-        {
-
-            using (DepthImageFrame depth = e.OpenDepthImageFrame())
-            {
-                if (depth == null ||
-                    kinectSensorChooser1.Kinect == null)
-                {
-                    return;
-                }
-                
-
-                //Map a joint location to a point on the depth map
-                //head
-                DepthImagePoint headDepthPoint =
-                    depth.MapFromSkeletonPoint(first.Joints[JointType.Head].Position);
-                //left hand
-                DepthImagePoint leftDepthPoint =
-                    depth.MapFromSkeletonPoint(first.Joints[JointType.HandLeft].Position);
-                //right hand
-                DepthImagePoint rightDepthPoint =
-                    depth.MapFromSkeletonPoint(first.Joints[JointType.HandRight].Position);
-
-
-                //Map a depth point to a point on the color image
-                //head
-                ColorImagePoint headColorPoint =
-                    depth.MapToColorImagePoint(headDepthPoint.X, headDepthPoint.Y,
-                    ColorImageFormat.RgbResolution640x480Fps30);
-                //left hand
-                ColorImagePoint leftColorPoint =
-                    depth.MapToColorImagePoint(leftDepthPoint.X, leftDepthPoint.Y,
-                    ColorImageFormat.RgbResolution640x480Fps30);
-                //right hand
-                ColorImagePoint rightColorPoint =
-                    depth.MapToColorImagePoint(rightDepthPoint.X, rightDepthPoint.Y,
-                    ColorImageFormat.RgbResolution640x480Fps30);
-
-                //Set location
-                CameraPosition(headImage, headColorPoint);
-                CameraPosition(leftEllipse, leftColorPoint);
-                CameraPosition(rightEllipse, rightColorPoint);
-            }        
-        }
-
-        Skeleton GetFirstSkeleton(AllFramesReadyEventArgs e)
-        {
-            using (SkeletonFrame skeletonFrameData = e.OpenSkeletonFrame())
-            {
-                if (skeletonFrameData == null)
-                {
-                    return null; 
-                }
-
-                
-                skeletonFrameData.CopySkeletonDataTo(allSkeletons);
-
-                //get the first tracked skeleton
-                Skeleton first;
-                if (allSkeletons[humanTrackedIndex].TrackingState != SkeletonTrackingState.Tracked)
-                {
-                    if (humanPreviouslyTracked)
+            for (int i = 0; i < 44; i++)
+                if (RouteLibrary.Class1.p[productIndex, i] != -1)
+                    if (RouteLibrary.Class1.p[productIndex, i].ToString().Length == 2)
+                        allPoints = allPoints + RouteLibrary.Class1.p[productIndex, i].ToString() + " ";
+                    else
                     {
-                        printDebug("Human Lost, index: " + humanTrackedIndex.ToString() + "\n");
-                        humanPreviouslyTracked = false;
+                        allPoints = allPoints + "0" + RouteLibrary.Class1.p[productIndex, i].ToString() + " ";
                     }
-                    for (int i = 0; i < 6; i++)
+
+            string send = "*" + allPoints + "#";
+            MessageBox.Show(send);
+            serial.Write(send);
+
+        }
+
+        private void DaoGou()
+        {
+            if (proid1 == -1)
+            {
+                SpeakLib.Class1.Read("还没输入商品哟亲");
+                MessageBox.Show("还没输入商品哟亲");
+            }
+            else if (proid2 == -1)
+            {
+                SpeakLib.Class1.Read("还缺一件商品哟亲");
+                MessageBox.Show("还缺一件商品哟亲");
+            }
+            else
+            {
+                //1.发送到商品1路过的节点
+                int proPoint1 = Product2MapPoint(proid1);
+                int proPoint2 = Product2MapPoint(proid2);
+            //    RouteLibrary.Class1.CreateNode(8, 13);
+             //   RouteLibrary.Class1.CreateNode(9, 14);
+           //     RouteLibrary.Class1.CreateNode(10, 15);
+                RouteLibrary.Class1.Dijkstra(0);
+                TransmitPoints(proPoint1);                                              //
+
+
+
+
+                //2.串口等待数据
+
+                bool waitingSerial = true;
+                    string recv = "";
+
+                serial.DiscardInBuffer();
+                while (waitingSerial)
+                {
+                    serial.BytesToRead
+
+                    recv = serial.Read();
+                   // serial.DiscardInBuffer();               //清除串口缓冲数据
+
+
+                    //1.遇到障碍物，则封路,重新算路径并发送节点
+                    if (recv != "")
                     {
-                        if (allSkeletons[i].TrackingState == SkeletonTrackingState.Tracked)
+                        MessageBox.Show("recv=");
+                        MessageBox.Show(recv);
+                        if (recv.IndexOf('!') != -1)
                         {
-                            humanTrackedIndex = i;
-                            humanPreviouslyTracked = true;
-                            printDebug("Human found, index: " + humanTrackedIndex.ToString() + "\n");
-                            break;
+                            serial.DiscardInBuffer(); 
+                            GetPoint(recv);
+                            RouteLibrary.Class1.CreateNode(lastNode, nextNode);
+                            RouteLibrary.Class1.Dijkstra(nowPoint);
+                            TransmitPoints(proPoint1);
                         }
+                            //解读出nowPoint,lastNode,nextNode
+
+                        else if (recv.IndexOf('@') != -1)
+                        {
+                            serial.DiscardInBuffer(); 
+
+                            System.Threading.Thread.Sleep(2000); //到达商品1,先暂停2s（具体数值还有待确定），作为取商品的时间，然后发送给单品商品类别
+
+                            if (products[proid1].type == 0)
+                            {
+                                serial.Write("*$");
+                                MessageBox.Show("Send *$");
+                            } //0表示食物
+
+                            else
+                            {
+                                serial.Write("*@");
+                                MessageBox.Show("Send *@");
+                            } //0表示食物
+
+                            RouteLibrary.Class1.Dijkstra(proPoint1); //以商品1为起点，计算到商品2的路径
+                            TransmitPoints(proPoint2);
+                        }
+                        else if (recv.IndexOf('#') != -1)
+                        {
+                                serial.DiscardInBuffer(); 
+                            //解读出nowPoint,lastNode,nextNode
+                                GetPoint(recv);
+                                RouteLibrary.Class1.CreateNode(lastNode, nextNode);
+                                RouteLibrary.Class1.Dijkstra(nowPoint);
+                                TransmitPoints(proPoint2);
+                        }
+                        else if (recv.IndexOf('$') != -1)
+                        {
+                            serial.DiscardInBuffer(); 
+
+                            System.Threading.Thread.Sleep(2000);//到达商品2,先暂停2s（具体数值还有待确定），作为取商品的时间，然后发送给单品商品类别
+
+                                if (products[proid2].type == 0)//0表示食物
+                                    serial.Write("*$");
+                                else
+                                    serial.Write("*@");
+                                waitingSerial = false;//跳出循环，进入跟随阶段
+                        }
+                        
+
                     }
 
-                }
-                first = allSkeletons[humanTrackedIndex];
-
-                return first;
-
-            }
-        }
-
-        private void StopKinect(KinectSensor sensor)
-        {
-            if (sensor != null)
-            {
-                if (sensor.IsRunning)
-                {
-                    //stop sensor 
-                    sensor.Stop();
-
-                    //stop audio if not null
-                    if (sensor.AudioSource != null)
-                    {
-                        sensor.AudioSource.Stop();
-                    }
-
-
-
+                    //每次执行最后要清除recv
+                    recv = "";
                 }
             }
         }
 
-        private void CameraPosition(FrameworkElement element, ColorImagePoint point)
+        //当串口收到有障碍物的信息时，解读出当前点，障碍物左右两点
+        private void GetPoint(string recv)
         {
-            //Divide by 2 for width and height so point is right in the middle 
-            // instead of in top/left corner
-            Canvas.SetLeft(element, point.X - element.Width / 2);
-            Canvas.SetTop(element, point.Y - element.Height / 2);
+            char[] delimiterChars = { ' ' };
 
-        }
+            string[] points = recv.Split(delimiterChars);
 
-        private void ScalePosition(FrameworkElement element, Joint joint)
-        {
-            //convert the value to X/Y
-            //Joint scaledJoint = joint.ScaleTo(1280, 720); 
-            
-            //convert & scale (.3 = means 1/3 of joint distance)
-            Joint scaledJoint = joint.ScaleTo(1280, 720, .3f, .3f);
-
-            Canvas.SetLeft(element, scaledJoint.Position.X);
-            Canvas.SetTop(element, scaledJoint.Position.Y); 
-            
-        }
-
-        private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
-        {
-            closing = true; 
-            StopKinect(kinectSensorChooser1.Kinect); 
-        }
-
-        private void textBox0_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            textBox0.ScrollToEnd();
-        }
-
-        private void TextSerialReceived_Changed(object sender, TextChangedEventArgs e)
-        {
-            //TextSerialReceived.SelectionStart = TextSerialReceived.Text.Length;
-            TextSerialReceived.ScrollToEnd();
-        }
-
-        private void socketServerStart()
-        {
-            IPAddress[] aryLocalAddr = null;
-            string strHostName = "";
-            const int nPortListen = 50000;
-            try
+            for (int i = 0; i < points.Length; i++)
+                MessageBox.Show(points[i]);
+            if (points.Length < 3)
             {
-                // NOTE: DNS lookups are nice and all but quite time consuming.
-                strHostName = Dns.GetHostName();
-                IPHostEntry ipEntry = Dns.GetHostByName(strHostName);
-                aryLocalAddr = ipEntry.AddressList;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Error trying to get local address {0} ", ex.Message);
-                printDebug("Error trying to get local address " + ex.Message + "\n");
-            }
-
-            // Verify we got an IP address. Tell the user if we did
-            if (aryLocalAddr == null || aryLocalAddr.Length < 1)
-            {
-                Console.WriteLine("Unable to get local address");
-                printDebug("Unable to get local address\n");
+                MessageBox.Show("串口数据有误");
                 return;
             }
-            //Console.WriteLine("Listening on : [{0}] {1}", strHostName, aryLocalAddr[0]);
-            printDebug("Listening on [" + strHostName + "] " + aryLocalAddr[0] +":" + nPortListen.ToString() + "\n");
 
-            // Create the listener socket in this machines IP address
-            Socket listener = new Socket(AddressFamily.InterNetwork,
-                              SocketType.Stream, ProtocolType.Tcp);
-            listener.Bind(new IPEndPoint(aryLocalAddr[0], nPortListen));
-            //listener.Bind( new IPEndPoint( IPAddress.Loopback, 399 ) );
-            // For use with localhost 127.0.0.1
-            listener.Listen(10);
-
-            // Setup a callback to be notified of connection requests
-            listener.BeginAccept(new AsyncCallback(OnConnectRequest), listener);
-
-            textBox0.AppendText("Begin accepting connection\n");
+            nowPoint = Convert.ToInt32(points[1]);
+            lastNode = Convert.ToInt32(points[2]);
+            nextNode = Convert.ToInt32(points[3]);
         }
 
-        public void OnConnectRequest(IAsyncResult ar)
+        //将商品编号对应到坐标上的点
+        private int Product2MapPoint(int proid)
         {
-            Socket listener = (Socket)ar.AsyncState;
-            client = listener.EndAccept(ar);
-            Console.WriteLine("Client {0}, joined", client.RemoteEndPoint);
-            printDebug("Client ");
-            printDebug(client.RemoteEndPoint.ToString());
-            printDebug(" joined\n");
-
-            listener.BeginAccept(new AsyncCallback(OnConnectRequest), listener);
-            SetupReceiveCallback();
-        }
-
-        private void Button_Click_1(object sender, RoutedEventArgs e)
-        {
-            string strDataLine = sockSrvTxtSend.Text.ToString();
-            // Convert to byte array and send.
-            Byte[] byteDateLine =
-                System.Text.Encoding.ASCII.GetBytes(strDataLine.ToCharArray());
-            client.Send(byteDateLine, byteDateLine.Length, 0);
-        }
-
-        public void SetupReceiveCallback()
-        {
-            try
+            int mapPoint = 0;
+            switch (proid + 1)
             {
-                AsyncCallback receiveData = new AsyncCallback(OnReceivedData);
-                client.BeginReceive(sockSrvRecvBuff, 0, sockSrvRecvBuff.Length, SocketFlags.None, receiveData, client);
+                case 1:
+                case 4:
+                    mapPoint = 8;
+                    break;
+                case 2:
+                case 5:
+                    mapPoint = 13;
+                    break;
+                case 3:
+                case 6:
+                    mapPoint = 18;
+                    break;
+                case 7:
+                case 10:
+                    mapPoint = 9;
+                    break;
+                case 8:
+                case 11:
+                    mapPoint = 14;
+                    break;
+                case 9:
+                case 12:
+                    mapPoint = 19;
+                    break;
+                case 13:
+                case 16:
+                    mapPoint = 10;
+                    break;
+                case 14:
+                case 17:
+                    mapPoint = 15;
+                    break;
+                case 15:
+                case 18:
+                    mapPoint = 20;
+                    break;
+                case 19:
+                case 22:
+                    mapPoint = 11;
+                    break;
+                case 20:
+                case 23:
+                    mapPoint = 16;
+                    break;
+                case 21:
+                case 24:
+                    mapPoint = 21;
+                    break;
+                case 25:
+                case 28:
+                    mapPoint = 12;
+                    break;
+                case 26:
+                case 29:
+                    mapPoint = 17;
+                    break;
+                case 27:
+                case 30:
+                    mapPoint = 22;
+                    break;
+                default:
+                    break;
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Recieve callback setup failed! {0}", ex.Message);
-                printDebug("Recieve callback setup failed!" + ex.Message + "\n");
-            }
+            return mapPoint;
         }
-
-        public void OnReceivedData(IAsyncResult ar)
-        {
-            //Socket client = (Socket)ar.AsyncState;
-            Socket clienttmp = (Socket)ar.AsyncState;
-            byte[] aryRet = GetReceivedData(ar);
-
-            // If no data was recieved then the connection is probably dead
-            if (aryRet.Length < 1)
-            {
-                Console.WriteLine("Client {0}, disconnected", clienttmp.RemoteEndPoint);
-                printDebug("Client " + clienttmp.RemoteEndPoint.ToString() + " disconnected\n");
-                clienttmp.Close();
-                return;
-            }
-            printDebug("Received String:");
-            string debugOutput = System.Text.Encoding.UTF8.GetString(aryRet);
-            printDebug(debugOutput+ "\n");
-            printDebug("Received Numbers:");
-            for (int i = 0; i < aryRet.Length; i++)
-            {
-                printDebug(aryRet[i].ToString() + " ");
-            }
-            printDebug("\n");
-            SetupReceiveCallback();
-        }
-
-        public byte[] GetReceivedData(IAsyncResult ar)
-        {
-            int nBytesRec = 0;
-            try
-            {
-                //nBytesRec = m_sock.EndReceive(ar);
-                nBytesRec = client.EndReceive(ar);
-            }
-            catch { }
-            byte[] byReturn = new byte[nBytesRec];
-            Array.Copy(sockSrvRecvBuff, byReturn, nBytesRec);
-
-            /*
-            // Check for any remaining data and display it
-            // This will improve performance for large packets 
-            // but adds nothing to readability and is not essential
-            int nToBeRead = m_sock.Available;
-            if( nToBeRead > 0 )
-            {
-                byte [] byData = new byte[nToBeRead];
-                m_sock.Receive( byData );
-                // Append byData to byReturn here
-            }
-            */
-            return byReturn;
-        }
-        public delegate void printDebugCallback(string str);
-        public void printDebug(string str)
-        {
-            textBox0.Dispatcher.Invoke(new printDebugCallback(DebugAppend), new object[] { str });
-        }
-
-        private void DebugAppend(string str)
-        {
-
-            textBox0.AppendText(str);
-        }
-
-        private void Button_Click(object sender, RoutedEventArgs e)
-        {
-            // Convert to byte array and send.
-            Byte[] byteDateLine = { Convert.ToByte(sockSrvNumSend.Text) };
-            client.Send(byteDateLine, byteDateLine.Length, 0);
-        }
-
-        private void Baud_Rates_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-
-        }
+        #endregion
     }
 }
+
+
